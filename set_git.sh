@@ -6,7 +6,7 @@ git pull
 echo
 
 # Ask the user for login details
-read -p 'Git repository url: ' upstreamVar
+rem read -p 'Git repository url: ' upstreamVar
 read -p 'Git Username: ' userVar
 read -p 'Git email: ' emailVar
 
@@ -19,7 +19,7 @@ echo setting up git
 
 git config --global user.name $userVar
 git config --global user.email $emailVar
-git remote set-url origin $upstreamVar
+rem git remote set-url origin $upstreamVar
 echo
 
 echo Please verify remote:
