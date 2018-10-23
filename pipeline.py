@@ -8,11 +8,11 @@ from moviepy.editor import VideoFileClip
 
 persp_src = np.float32([[285, 664], [1012, 664], [685, 450], [596, 450]])
 # TODO: The destination of the xform doesn't have to be the same dims as the img, this can actually cause loss of detail near the bottom
-td_width = 2560
+td_width = 1280
 ll_targ = td_width * 7 / 16
 rl_targ = td_width * 9 / 16
-td_height = 2560
-persp_dst = np.float32([[ll_targ, td_height], [rl_targ, td_height], [rl_targ, td_height-640], [ll_targ, td_height-640]])
+td_height = 1280
+persp_dst = np.float32([[ll_targ, td_height], [rl_targ, td_height], [rl_targ, td_height-320], [ll_targ, td_height-320]])
 M = cv2.getPerspectiveTransform(persp_src, persp_dst)
 
 def process(img, mtx, dist):
@@ -34,6 +34,8 @@ def process(img, mtx, dist):
 
     # Apply perspective transform
     img = cv2.warpPerspective(img, M, dsize=(td_width, td_height), flags=cv2.INTER_LINEAR)
+
+
     return img
 
 if __name__ == "__main__":
@@ -45,7 +47,7 @@ if __name__ == "__main__":
         cv2.imwrite(os.path.join("output_images", os.path.basename(name)), img)
 
     for name in glob.glob("*.mp4"):
-        #break
+        break
         clip = VideoFileClip(name)
         def pvid(i):
             chan = process(i, cal['mtx'], cal['dist'])
