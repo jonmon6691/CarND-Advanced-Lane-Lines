@@ -28,7 +28,7 @@ def process(img, mtx, dist):
     dx = np.absolute(cv2.Sobel(gray, cv2.CV_64F, 1, 0))
     dx = np.uint8(255*dx/np.max(dx))
 
-    img = np.zeros_like(img)
+    img = np.zeros_like(gray)
     img[l > 128] = 255
     img[dx > 30] = 255
 
