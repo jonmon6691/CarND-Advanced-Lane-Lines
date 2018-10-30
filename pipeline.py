@@ -5,132 +5,65 @@ import os
 import numpy as np
 from moviepy.editor import VideoFileClip
 
+import helpers
+import lanes
 
+# Compute perspective transform matrix
 persp_src = np.float32([[285, 664], [1012, 664], [685, 450], [596, 450]])
-# TODO: The destination of the xform doesn't have to be the same dims as the img, this can actually cause loss of detail near the bottom
 td_width = 1280
 ll_targ = td_width * 7 / 16
 rl_targ = td_width * 9 / 16
 td_height = 1280
-persp_dst = np.float32([[ll_targ, td_height], [rl_targ, td_height], [rl_targ, td_height//2], [ll_targ, td_height//2]])
+persp_dst = np.float32([[ll_targ, td_height-10], [rl_targ, td_height-10], [rl_targ, td_height//4], [ll_targ, td_height//4]])
 M = cv2.getPerspectiveTransform(persp_src, persp_dst)
-Minv = cv2.getPerspectiveTransform(persp_dst, persp_src)
+
+# Assumed values given 3.7m wide lanes with 3.0m long dashed lines
+# pixels in perspective transformed space
+ym_per_px = 3.0 / 100
+xm_per_px = 3.7 / 163
 
 #Create triangular convolution window 
-window_width = 20
+window_width = 40
 window = np.mgrid[:window_width // 2]
 window = np.concatenate([window, window[::-1]])
 
-def process(img, mtx, dist):
+def process(img, mtx, dist, db=None):
     # Apply camera calibration
     img = cv2.undistort(img, mtx, dist, None, mtx)
-    
+    #db.s(img, "og")
+
+    # Color space conversions
     gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
     hls = cv2.cvtColor(img, cv2.COLOR_BGR2HLS)
-    #h = hls[:,:,0]
-    #s = hls[:,:,1]
+    h = hls[:,:,0]
+    s = hls[:,:,1]
     l = hls[:,:,2]
 
-    dx = np.absolute(cv2.Sobel(gray, cv2.CV_64F, 1, 0))
-    dx = np.uint8(255*dx/np.max(dx))
+    # Find yellow lines
+    ret, yellow = cv2.threshold(h, 17, 255, cv2.THRESH_BINARY) # h > 17
+    ret, yellow2 = cv2.threshold(h, 34, 255, cv2.THRESH_BINARY_INV) # h < 34
+    yellows = cv2.bitwise_and(yellow, yellow2) # 17 < h < 34
+    ret, l = cv2.threshold(l, 90, 255, cv2.THRESH_BINARY) # l > 90
+    yellows = cv2.bitwise_and(yellows, l)
 
-    th = np.zeros_like(gray) # thresholding
-    th[l > 128] = 255
-    th[dx > 30] = 255
+    # Find white lines
+    ret, whites = cv2.threshold(s, 200, 255, cv2.THRESH_BINARY) # s > 200
 
-    # Apply perspective transform
-    th = cv2.warpPerspective(th, M, dsize=(td_width, td_height), flags=cv2.INTER_LINEAR)
+    # Combine color masks
+    color_mask =  cv2.bitwise_or(yellows, whites)
+    
+    # Perspective transform
+    cw = cv2.warpPerspective(color_mask, M, dsize=(td_width, td_height), flags=cv2.INTER_LINEAR)
+    #db.s(cw, "cm_warp")
 
-    lf_debug = np.zeros((th.shape[1], th.shape[0], 3))
-    fit_len = 200
 
-    timeout = 200
+    l = lanes.LaneFinder(ll_targ, window_width, td_width)
+    r = lanes.LaneFinder(rl_targ, window_width, td_width)
 
-    class LaneFinder:
-        def __init__(self, initial_position):
-            self.c = [initial_position] # Record of detected lane centers
-            self.g = [True] # Record of when the lane was detected
-            self.ys = [0] # Record of the y indexes where lane was found (1 is bottom)
-            self.wc = self.c[0] # curent search window center
-            self.dwc = 0 # current dy/dt of search window center
-
-            self.fit = [0,0] # last fit line coef.s
-
-        @property
-        def wl(self): # current window lower bound
-            return int(np.clip(self.wc - window_width / 2, 0, td_width - window_width - 1))
-
-        @property
-        def wu(self): # current window upper bound
-            return int(np.clip(self.wc + window_width / 2, window_width, td_width - 1))
-
-        def update_fit(self):
-            mask = self.g[:fit_len]
-            if sum(mask) > fit_len/2:
-                xs = np.array(self.c[:fit_len])
-                ys = np.mgrid[:len(xs)]
-                self.fit = np.polyfit(ys[mask], xs[mask], 1)
-
-        def uf2(self, i):
-            xs = np.array(self.c)[self.g]
-            ys = self.ys
-            if len(xs) > 20:
-                self.fit2 = np.polyfit(ys, xs, 2)
-            else:
-                self.fit2 = None
-            return self.get_fit(i)
-
-        def get_fit(self, i):
-            if self.fit2 is None:
-                return self.c[0]
-            else:
-                x = self.fit2[0] * i**2 + self.fit2[1] * i + self.fit2[2]
-                return np.int(np.clip(x, 0, td_width-1))
-
-        def timed_out(self):
-            # Stop searching for a line if you lost it
-            return len(self.g) > timeout and sum(self.g[:timeout]) == 0
-
-        def find_lane(self, conv):
-            self.winconv = conv[self.wl: self.wu]
-            if np.max(self.winconv) > 10 and not self.timed_out():
-                nlc = np.clip(np.argmax(self.winconv) + self.wl, 0, td_width-1)
-                self.g.insert(0, True)
-            else:
-                nlc = self.c[0]
-                self.g.insert(0, False)
-            self.c.insert(0, nlc)
-            return self.g[0], nlc
-
-        def f(self, f): # Apply force
-            self.dwc += f
-
-        def tick(self, dt): # Integrate applied force, reset force accumulator
-            self.wc += self.dwc * dt
-            self.dwc = 0
-
-        def seek_lane(self, strength, other_lane, offset):
-            # Window should move towards an offset away from other lane line
-            self.f(strength * (other_lane.c[0] - self.wc + offset))
-
-        def seek_center(self, strength):
-            # Window should move toward the last lane line center found
-            self.f(strength * (self.c[0] - self.wl - window_width / 2))
-
-        def seek_fit(self, strength, i):
-            self.f(strength * (self.get_fit(i) - self.wc))
-
-        def ni(self, img_row): # Noise index, should approach zero with the confidence in the lane position
-            # Super naeive impl. If you have pixels on both edges of the window, its probably bad
-            if img_row[self.wl] > 128 and img_row[self.wu] > 128:
-                self.norm_ni = 0
-            else:
-                self.norm_ni = 1
-            return self.norm_ni
-
-    l = LaneFinder(ll_targ)
-    r = LaneFinder(rl_targ)
-
+    th = cw
+    lf_debug = np.zeros((th.shape[0], th.shape[1], 3))
+    lf_debug = cv2.cvtColor(cw, cv2.COLOR_GRAY2BGR)
+    hrez = 20 # Look at 20 strips of the image
     for i, row in enumerate(th[::-1], start=1): # Go line by line through the image bottom up
         # Draw search windows
         if not l.timed_out():
@@ -144,15 +77,13 @@ def process(img, mtx, dist):
         conv = np.convolve(window, row)[window_width // 2 - 1:1-window_width // 2]
 
         # Find the max of the convolution within the search window, mark it
-        ret, nlc = l.find_lane(conv)
+        ret, nlc = l.find_lane(conv, i)
         if ret: 
             lf_debug[len(lf_debug)-i,int(nlc)] = [0,0,255]
-            l.ys.insert(0, i)
 
-        ret, nrc = r.find_lane(conv)
+        ret, nrc = r.find_lane(conv, i)
         if ret: 
             lf_debug[len(lf_debug)-i,int(nrc)] = [0,0,255]
-            r.ys.insert(0, i)
         
         # Calculate polyfit coefs
         l.update_fit()
@@ -187,17 +118,54 @@ def process(img, mtx, dist):
         l.tick(1)
         r.tick(1)
 
-    # Inverse xform
-    lf_debug = np.uint8(lf_debug)
+    # Find polynomials
+    lane_overlay = np.zeros_like(lf_debug)
+
+    for i in range(len(cw)):
+        i += 1
+        left = int(l.get_fit(i))
+        right = int(r.get_fit(i))
+        if i < max(l.ys):
+            lane_overlay[len(cw) - i,left-10:left] = [0, 0, 255]
+        if i < max(r.ys):
+            lane_overlay[len(cw) - i,right:right+10] = [0, 0, 255]
+        if i < max(l.ys) and i < max(r.ys):
+            lane_overlay[len(cw) - i,left:right] = [0, 255, 0]
 
     
+    #Calculate distance to center of lane
+    if l.fit2 is not None and r.fit2 is not None:
+        center = (r.fit2[-1] - l.fit2[-1]) / 2 + l.fit2[-1]
+        offset = (640 - center) * xm_per_px
+        cv2.putText(img, f"Center: {offset:0.3f}m", (100,170), cv2.FONT_HERSHEY_SIMPLEX, 1, (255,255,255))
+    else:
+        cv2.putText(img, f"Center: Not found.", (100,170), cv2.FONT_HERSHEY_SIMPLEX, 1, (255,255,255))
 
-    lf_debug = cv2.warpPerspective(lf_debug, M, dsize=(gray.shape[1], gray.shape[0]), flags=cv2.WARP_INVERSE_MAP|cv2.INTER_NEAREST)
-    
-    mask = cv2.cvtColor(lf_debug, cv2.COLOR_RGB2GRAY)
-    _, mask = cv2.threshold(mask, 0, 255, cv2.THRESH_BINARY_INV)
-    img = cv2.bitwise_and(img, img, mask=mask)
-    img = cv2.addWeighted(img, 1, lf_debug, 1, 0)
+    # Calculate radius
+    y_eval = 0
+    if l.fit2 is not None:
+        l.ys = np.array(l.ys) * ym_per_px
+        l.c = np.array(l.c) * xm_per_px
+        l.uf2(0)
+        rad_l = np.sqrt((1 + (2 * l.fit2[0] * y_eval + l.fit2[1])**2)**3) / (2 * l.fit2[0])
+        cv2.putText(img, f"Radius left : {rad_l:0.0f}m", (100,100), cv2.FONT_HERSHEY_SIMPLEX, 1, (255,255,255))
+    else:
+        cv2.putText(img, f"Radius left : Not found.", (100,100), cv2.FONT_HERSHEY_SIMPLEX, 1, (255,255,255))
+
+    if r.fit2 is not None:
+        r.ys = np.array(r.ys) * ym_per_px
+        r.c = np.array(r.c) * xm_per_px
+        r.uf2(0)
+        rad_r = np.sqrt((1 + (2 * r.fit2[0] * y_eval + r.fit2[1])**2)**3) / (2 * r.fit2[0])
+        cv2.putText(img, f"Radius right: {rad_r:0.0f}m", (100,135), cv2.FONT_HERSHEY_SIMPLEX, 1, (255,255,255))
+    else:
+        cv2.putText(img, f"Radius right: Not found.", (100,135), cv2.FONT_HERSHEY_SIMPLEX, 1, (255,255,255))
+        
+
+    # Overlay lane diagram
+    db.s(lane_overlay, "lo")
+    lane_overlay = cv2.warpPerspective(lane_overlay, M, dsize=(gray.shape[1], gray.shape[0]), flags=cv2.WARP_INVERSE_MAP|cv2.INTER_NEAREST)
+    img = cv2.addWeighted(img, 1, lane_overlay, 0.5, 0)
 
     return img
 
@@ -208,16 +176,30 @@ if __name__ == "__main__":
     for name in glob.glob("test_images/*.jpg"):
         #if name != r"test_images\test3.jpg": continue
         print(name)
-        img = process(cv2.imread(name), cal['mtx'], cal['dist'])
+        db = helpers.PipelineDebug(name, "output_images")
+        db.enable = True
+        img = process(cv2.imread(name), cal['mtx'], cal['dist'], db=db)
         cv2.imwrite(os.path.join("output_images", os.path.splitext(os.path.basename(name))[0]+".png"), img)
 
     for name in glob.glob("test_images/*.mp4"):
         break
         clip = VideoFileClip(name)
         bn = os.path.basename(name)
-        def pvid(i):
-            chan = process(i, cal['mtx'], cal['dist'])
-            return chan#np.dstack([chan, chan, chan])
+        class mutInt:
+            pass
+        i = mutInt()
+        i.i = 0
+        def pvid(frame, i=i):
+            frame = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
+            db = helpers.PipelineDebug(name, "output_images")
+            db.img_name += str(i.i)
+            db.img_ext = ".png"
+            db.enable = False
+            if i.i % 100 == 0:
+                db.enable = True
+            chan = process(frame, cal['mtx'], cal['dist'], db=db)
+            i.i += 1
+            return np.dstack([chan, chan, chan])
         xform = clip.fl_image(pvid)
         xform.write_videofile(os.path.join("output_videos", bn), audio=False)
         #break
