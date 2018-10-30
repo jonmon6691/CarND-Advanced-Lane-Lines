@@ -28,12 +28,13 @@ window = np.mgrid[:window_width // 2]
 window = np.concatenate([window, window[::-1]])
 
 def process(img, mtx, dist, db=None):
+    db.s(img, "input")
+    
     # Apply camera calibration
     img = cv2.undistort(img, mtx, dist, None, mtx)
-    #db.s(img, "og")
+    db.s(img, "undistorted")
 
     # Color space conversions
-    gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
     hls = cv2.cvtColor(img, cv2.COLOR_BGR2HLS)
     h = hls[:,:,0]
     s = hls[:,:,1]
@@ -45,25 +46,27 @@ def process(img, mtx, dist, db=None):
     yellows = cv2.bitwise_and(yellow, yellow2) # 17 < h < 34
     ret, l = cv2.threshold(l, 90, 255, cv2.THRESH_BINARY) # l > 90
     yellows = cv2.bitwise_and(yellows, l)
+    db.s(yellows, "yellows")
 
     # Find white lines
     ret, whites = cv2.threshold(s, 200, 255, cv2.THRESH_BINARY) # s > 200
+    db.s(whites, "whites")
 
     # Combine color masks
     color_mask =  cv2.bitwise_or(yellows, whites)
-    
+    db.s(color_mask, "color_mask")
+
     # Perspective transform
     cw = cv2.warpPerspective(color_mask, M, dsize=(td_width, td_height), flags=cv2.INTER_LINEAR)
-    #db.s(cw, "cm_warp")
+    db.s(cw, "cm_warp")
 
 
     l = lanes.LaneFinder(ll_targ, window_width, td_width)
     r = lanes.LaneFinder(rl_targ, window_width, td_width)
 
     th = cw
-    lf_debug = np.zeros((th.shape[0], th.shape[1], 3))
+    lf_debug = np.dstack([th, th, th]) #np.zeros((th.shape[0], th.shape[1], 3))
     lf_debug = cv2.cvtColor(cw, cv2.COLOR_GRAY2BGR)
-    hrez = 20 # Look at 20 strips of the image
     for i, row in enumerate(th[::-1], start=1): # Go line by line through the image bottom up
         # Draw search windows
         if not l.timed_out():
@@ -86,9 +89,7 @@ def process(img, mtx, dist, db=None):
             lf_debug[len(lf_debug)-i,int(nrc)] = [0,0,255]
         
         # Calculate polyfit coefs
-        l.update_fit()
         lf = l.uf2(i)
-        r.update_fit()
         rf = r.uf2(i)
 
         lf_debug[len(lf_debug)-i,int(lf)] = [0,255,255]
@@ -117,7 +118,7 @@ def process(img, mtx, dist, db=None):
 
         l.tick(1)
         r.tick(1)
-
+    db.s(lf_debug, "lane_finder")
     # Find polynomials
     lane_overlay = np.zeros_like(lf_debug)
 
@@ -164,7 +165,7 @@ def process(img, mtx, dist, db=None):
 
     # Overlay lane diagram
     db.s(lane_overlay, "lo")
-    lane_overlay = cv2.warpPerspective(lane_overlay, M, dsize=(gray.shape[1], gray.shape[0]), flags=cv2.WARP_INVERSE_MAP|cv2.INTER_NEAREST)
+    lane_overlay = cv2.warpPerspective(lane_overlay, M, dsize=(color_mask.shape[1], color_mask.shape[0]), flags=cv2.WARP_INVERSE_MAP|cv2.INTER_NEAREST)
     img = cv2.addWeighted(img, 1, lane_overlay, 0.5, 0)
 
     return img
@@ -174,32 +175,33 @@ if __name__ == "__main__":
         cal = pickle.load(f)
 
     for name in glob.glob("test_images/*.jpg"):
-        #if name != r"test_images\test3.jpg": continue
+        break #if name != r"test_images\straight_lines1.jpg": continue
         print(name)
         db = helpers.PipelineDebug(name, "output_images")
         db.enable = True
         img = process(cv2.imread(name), cal['mtx'], cal['dist'], db=db)
-        cv2.imwrite(os.path.join("output_images", os.path.splitext(os.path.basename(name))[0]+".png"), img)
+        db.s(img, "final")
 
     for name in glob.glob("test_images/*.mp4"):
-        break
-        clip = VideoFileClip(name)
+        if name != r"test_images\project_video.mp4": continue
+        clip = VideoFileClip(name).subclip(0,0.5)
         bn = os.path.basename(name)
-        class mutInt:
-            pass
-        i = mutInt()
-        i.i = 0
-        def pvid(frame, i=i):
+        #class mutInt:
+        #    pass 
+        #i = mutInt()
+        #i.i = 0
+        def pvid(frame):#, i=i):
             frame = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
             db = helpers.PipelineDebug(name, "output_images")
-            db.img_name += str(i.i)
-            db.img_ext = ".png"
+            #db.img_name += str(i.i)
+            #db.img_ext = ".png"
             db.enable = False
-            if i.i % 100 == 0:
-                db.enable = True
-            chan = process(frame, cal['mtx'], cal['dist'], db=db)
-            i.i += 1
-            return np.dstack([chan, chan, chan])
+            #if i.i % 100 == 0:
+            #    db.enable = True
+            frame = process(frame, cal['mtx'], cal['dist'], db=db)
+            frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+            #i.i += 1
+            return frame#np.dstack([chan, chan, chan])
         xform = clip.fl_image(pvid)
         xform.write_videofile(os.path.join("output_videos", bn), audio=False)
         #break
