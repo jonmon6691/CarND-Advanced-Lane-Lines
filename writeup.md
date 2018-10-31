@@ -20,7 +20,7 @@ The goals / steps of this project are the following:
 [cal_img]: ./camera_cal/calibration1.jpg
 [undist_cal_img]: ./writeup_files/caltest.jpg
 
-[dist_road]: output_images\straight_lines2_Step00_input.jpg
+[dist_road]: output_images/straight_lines2_Step00_input.jpg
 [undist_road]: ./writeup_files/straight_lines2_Step01_undistorted.jpg
 
 [undist_yellow]: ./writeup_files/straight_lines1_Step01_undistorted.jpg
@@ -31,11 +31,11 @@ The goals / steps of this project are the following:
 [persp_src]: ./writeup_files/persp_src.jpg
 [persp_dst]: ./writeup_files/persp_dst.jpg
 
-[cm_warp]: writeup_files\test4_Step05_cm_warp.jpg
-[lf]: writeup_files\test4_Step06_lane_finder.jpg
-[lf_close]: writeup_files\test4_Step06_lane_finder_zoom.jpg
+[cm_warp]: writeup_files/test4_Step05_cm_warp.jpg
+[lf]: writeup_files/test4_Step06_lane_finder.jpg
+[lf_close]: writeup_files/test4_Step06_lane_finder_zoom.jpg
 
-[final]: writeup_files\test2_Step08_final.jpg
+[final]: writeup_files/test2_Step08_final.jpg
 
 [video1]: ./project_video.mp4
 
