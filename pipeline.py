@@ -69,31 +69,18 @@ def process(img, mtx, dist, db=None):
     lf_debug = cv2.cvtColor(cw, cv2.COLOR_GRAY2BGR)
     for i, row in enumerate(th[::-1], start=1): # Go line by line through the image bottom up
         # Draw search windows
-        if not l.timed_out():
-            lf_debug[len(lf_debug)-i,l.wl] = [255,255,0]
-            lf_debug[len(lf_debug)-i,l.wu] = [255,255,0]
-        if not r.timed_out():
-            lf_debug[len(lf_debug)-i,r.wl] = [255,255,0]
-            lf_debug[len(lf_debug)-i,r.wu] = [255,255,0]
-        
+
         # Convol window with row of pixels, crop the overhang
         conv = np.convolve(window, row)[window_width // 2 - 1:1-window_width // 2]
 
         # Find the max of the convolution within the search window, mark it
         ret, nlc = l.find_lane(conv, i)
-        if ret: 
-            lf_debug[len(lf_debug)-i,int(nlc)] = [0,0,255]
 
         ret, nrc = r.find_lane(conv, i)
-        if ret: 
-            lf_debug[len(lf_debug)-i,int(nrc)] = [0,0,255]
-        
+
         # Calculate polyfit coefs
         lf = l.uf2(i)
         rf = r.uf2(i)
-
-        lf_debug[len(lf_debug)-i,int(lf)] = [0,255,255]
-        lf_debug[len(lf_debug)-i,int(rf)] = [0,255,255]
 
         # Logic to move the search window
         if l.g[0]: # If a lane was found on this row
@@ -119,6 +106,7 @@ def process(img, mtx, dist, db=None):
         l.tick(1)
         r.tick(1)
     db.s(lf_debug, "lane_finder")
+    
     # Find polynomials
     lane_overlay = np.zeros_like(lf_debug)
 
@@ -175,7 +163,6 @@ if __name__ == "__main__":
         cal = pickle.load(f)
 
     for name in glob.glob("test_images/*.jpg"):
-        break #if name != r"test_images\straight_lines1.jpg": continue
         print(name)
         db = helpers.PipelineDebug(name, "output_images")
         db.enable = True
@@ -184,24 +171,16 @@ if __name__ == "__main__":
 
     for name in glob.glob("test_images/*.mp4"):
         if name != r"test_images\project_video.mp4": continue
-        clip = VideoFileClip(name).subclip(0,0.5)
+        clip = VideoFileClip(name)
         bn = os.path.basename(name)
-        #class mutInt:
-        #    pass 
-        #i = mutInt()
-        #i.i = 0
-        def pvid(frame):#, i=i):
+
+        def pvid(frame):
             frame = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
             db = helpers.PipelineDebug(name, "output_images")
-            #db.img_name += str(i.i)
-            #db.img_ext = ".png"
             db.enable = False
-            #if i.i % 100 == 0:
-            #    db.enable = True
             frame = process(frame, cal['mtx'], cal['dist'], db=db)
             frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-            #i.i += 1
-            return frame#np.dstack([chan, chan, chan])
+            return frame
         xform = clip.fl_image(pvid)
         xform.write_videofile(os.path.join("output_videos", bn), audio=False)
         #break

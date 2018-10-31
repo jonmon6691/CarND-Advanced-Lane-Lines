@@ -36,5 +36,11 @@ def get_cals(img_list, db=False):
     return {'mtx':mtx, 'dist':dist}
 
 if __name__ == "__main__":
+    cal = get_cals(glob.glob("camera_cal/*.jpg"))
+    
     with open("camera.cal", "wb") as f:
-        pickle.dump(get_cals(glob.glob("camera_cal/*.jpg")), f)
+        pickle.dump(cal, f)
+
+    img = cv2.imread(r"camera_cal\calibration1.jpg")
+    und = cv2.undistort(img, cal["mtx"], cal["dist"], None, cal["mtx"])
+    cv2.imwrite(r"writeup_files\caltest.jpg", und)
