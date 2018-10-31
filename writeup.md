@@ -20,7 +20,7 @@ The goals / steps of this project are the following:
 [cal_img]: ./camera_cal/calibration1.jpg
 [undist_cal_img]: ./writeup_files/caltest.jpg
 
-[dist_road]: output_images/straight_lines2_Step00_input.jpg
+[dist_road]: writeup_files/straight_lines2_Step00_input.jpg
 [undist_road]: ./writeup_files/straight_lines2_Step01_undistorted.jpg
 
 [undist_yellow]: ./writeup_files/straight_lines1_Step01_undistorted.jpg
@@ -36,8 +36,6 @@ The goals / steps of this project are the following:
 [lf_close]: writeup_files/test4_Step06_lane_finder_zoom.jpg
 
 [final]: writeup_files/test2_Step08_final.jpg
-
-[video1]: ./project_video.mp4
 
 ## Writeup / README
 
@@ -175,7 +173,7 @@ The lanes are painted up until the last detected pixel, and the green region is 
 
 The frames in the video had to be converted to BGR, processed in the pipeline, then converted back to RGB. This is primarily because the yellow lane selection filter depends on the correct hue value on the input.
 
-Here's a [link to my video result](writeup_files\project_video.mp4)
+Here's a [link to my video result](writeup_files/project_video.mp4)
 
 ---
 
